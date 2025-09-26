@@ -1,0 +1,251 @@
+---
+- name: Collect Extended Linux Security & System Audit
+  hosts: chennai
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Create audit report file
+      copy:
+        dest: /tmp/security_audit1.txt
+        content: "===== EXTENDED SECURITY AUDIT =====\n"
+
+    # ✅ Basic OS Info
+    - name: Save OS version
+      lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "OS_VERSION: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Save uptime
+      shell: uptime
+      register: uptime_out
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "UPTIME: {{ uptime_out.stdout }}"
+
+    - name: Last reboot
+      shell: who -b | awk '{print $3,$4}'
+      register: reboot_out
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "LAST_REBOOT: {{ reboot_out.stdout }}"
+    
+# Networking / Ports
+    - name: Listening ports
+      shell: ss -tuln | awk 'NR>1 {split($5,a,":"); print a[length(a)]}' | sort -u | paste -sd "," - 
+      register: ports_out
+    - name: Save Listening ports info
+      blockinfile:
+        path: /tmp/security_audit1.txt
+        create: yes
+        block: |
+          LISTENING_PORTS:
+          {{ ports_out.stdout }}
+
+
+
+# ✅ SELinux
+    - name: SELinux status
+      shell: getenforce || echo "Not installed"
+      register: selinux_out
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "SELINUX_STATUS: {{ selinux_out.stdout }}"
+
+    # ✅ Sudoers
+    - name: Sudoers entries
+      shell: grep -vE '^#|^$' /etc/sudoers
+      register: sudoers_out
+    - blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          SUDOERS_ENTRIES:
+          {{ sudoers_out.stdout }}
+
+    # ✅ Users
+    - name: Users with UID 0
+      shell: "awk -F: '$3 == 0 {print $1}' /etc/passwd"
+      register: uid0_users
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "USERS_WITH_UID0: {{ uid0_users.stdout }}"
+
+    - name: Locked users
+      shell: passwd -S -a | grep "L" | awk '{print $1}'
+      register: locked_users
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "LOCKED_USERS: {{ locked_users.stdout | default('None') }}"
+
+    # ✅ SSH Config
+    - name: SSH root login
+      shell: grep -E "^PermitRootLogin" /etc/ssh/sshd_config || echo "Not set"
+      register: ssh_root
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "SSH_ROOT_ALLOWED: {{ ssh_root.stdout }}"
+
+    - name: SSH auth methods
+      shell: grep -E "^AuthenticationMethods" /etc/ssh/sshd_config || echo "Default"
+      register: ssh_auth
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "SSH_AUTH_METHODS: {{ ssh_auth.stdout }}"
+
+    - name: SSH allow/deny users
+      shell: "(grep -E '^AllowUsers' /etc/ssh/sshd_config || echo 'AllowUsers: Not set') && (grep -E '^DenyUsers' /etc/ssh/sshd_config || echo 'DenyUsers: Not set')"
+      register: ssh_users
+    - blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          SSH_ALLOWED_USERS / DENY_USERS:
+          {{ ssh_users.stdout }}
+
+    # ✅ Security Events
+    - name: Failed login attempts last 24h
+      shell: journalctl --since "24 hours ago" | grep "Failed password" | wc -l
+      register: failed_24h
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "FAILED_LOGIN_LAST_24H: {{ failed_24h.stdout }}"
+
+    - name: Recent SSH logins
+      shell: last -n 5
+      register: ssh_logins
+    - blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          RECENT_SSH_LOGINS:
+          {{ ssh_logins.stdout }}
+
+    - name: Active users
+      shell: who
+      register: active_users
+    - blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          ACTIVE_USERS:
+          {{ active_users.stdout }}
+
+    # ✅ Malware / Rootkit scan
+    - name: Rootkit scan check
+      shell: command -v rkhunter >/dev/null && rkhunter --check --sk || echo "Not Installed"
+      register: rootkit_scan
+      ignore_errors: yes
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "MALWARE_ROOTKIT_SCAN_RESULT: {{ rootkit_scan.stdout | default('Not Available') }}"
+
+    # ✅ File integrity tools
+    - name: File integrity tool status
+      shell: (command -v aide && echo "AIDE installed") || (command -v tripwire && echo "Tripwire installed") || echo "None"
+      register: integrity_tool
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "FILE_INTEGRITY_TOOL_STATUS: {{ integrity_tool.stdout }}"
+
+    # ✅ Shares
+    - name: Mounted network shares
+      shell: mount | grep -E "nfs|cifs" || echo "No NFS/CIFS mounts"
+      register: net_shares
+      ignore_errors: yes
+    - blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          MOUNTED_NETWORK_SHARES:
+          {{ net_shares.stdout | default('None') }}
+
+    - name: NFS exports
+      shell: cat /etc/exports || echo "No NFS exports"
+      register: nfs_exports
+    - blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          NFS_EXPORTS:
+          {{ nfs_exports.stdout }}
+
+    # ✅ Database & SSL
+    - name: MySQL/DB remote bind
+      shell: grep "^bind-address" /etc/my.cnf* || echo "Not set"
+      register: db_bind
+      ignore_errors: yes
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "MYSQL/DB_REMOTE_BIND: {{ db_bind.stdout }}"
+
+    - name: TLS certificate expiry
+      shell: "echo | openssl s_client -connect localhost:443 -servername localhost 2>/dev/null | openssl x509 -noout -enddate || echo 'No TLS cert'"
+      register: tls_expiry
+      ignore_errors: yes
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "TLS_CERT_EXPIRY: {{ tls_expiry.stdout }}"
+
+    # ✅ Backups & Time sync
+    - name: Backup last run (check /var/log/backup.log)
+      shell: tail -n 1 /var/log/backup.log 2>/dev/null || echo "No backup log"
+      register: backup_log
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "BACKUP_LAST_RUN: {{ backup_log.stdout }}"
+
+    - name: Time sync status
+      shell: timedatectl show | grep NTPSynchronized || echo "timedatectl not available"
+      register: time_sync
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "TIME_SYNC_STATUS: {{ time_sync.stdout }}"
+    
+    - name: Check time sync with timedatectl (systemd)
+      shell: timedatectl show | grep NTPSynchronized || echo "timedatectl not available"
+      register: timesync_status
+      ignore_errors: yes
+
+    - name: Fallback to ntpstat (if available)
+      shell: ntpstat 2>/dev/null || echo "ntpstat not available"
+      register: ntpstat_status
+      when: "'timedatectl not available' in timesync_status.stdout"
+      ignore_errors: yes
+
+    - name: Fallback to check ntpd/chronyd processes
+      shell: pgrep -x ntpd >/dev/null && echo "ntpd running" || pgrep -x chronyd >/dev/null && echo "chronyd running" || echo "No time sync service running"
+      register: process_status
+      when: "'ntpstat not available' in ntpstat_status.stdout"
+      ignore_errors: yes
+
+    - name: Save time sync status
+      lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "Time Sync Status: {{ timesync_status.stdout | default('') }} {{ ntpstat_status.stdout | default('') }} {{ process_status.stdout | default('') }}" 
+    # ✅ Logs
+    - name: Critical log size (/var/log/secure)
+      shell: du -h /var/log/secure | awk '{print $1}'
+      register: log_size
+      ignore_errors: yes
+    - lineinfile:
+        path: /tmp/security_audit1.txt
+        line: "CRITICAL_LOG_SIZE: {{ log_size.stdout | default('Unknown') }}"
+
+    - name: TCP Wrappers allow/deny
+      shell: |
+        allow_rules=$(grep -vE '^\s*#|^\s*$' /etc/hosts.allow || true)
+        deny_rules=$(grep -vE '^\s*#|^\s*$' /etc/hosts.deny || true)
+
+        if [ -z "$allow_rules" ]; then
+        allow_rules="Not configured"
+        fi
+        if [ -z "$deny_rules" ]; then
+        deny_rules="Not configured"
+        fi
+
+        echo "hosts.allow: $allow_rules"
+        echo "hosts.deny: $deny_rules"
+      register: tcp_wrappers
+      ignore_errors: yes
+
+    - name: Save TCP Wrappers info
+      blockinfile:
+        path: /tmp/security_audit1.txt
+        block: |
+          TCP_WRAPPERS_ALLOW/DENY:
+          {{ tcp_wrappers.stdout }}
