@@ -1,0 +1,108 @@
+---
+- name: Collect Linux Security Information
+  hosts: chennai
+  gather_facts: no
+  become: yes
+
+  tasks:
+    - name: Create security report file
+      copy:
+        dest: /tmp/security_report.txt
+        content: "===== SECURITY REPORT =====\n"
+
+    - name: Whoami check
+      shell: whoami
+      register: whoami_out
+
+    - name: Save whoami result
+      lineinfile:
+        path: /tmp/security_report.txt
+        line: "Current user: {{ whoami_out.stdout }}"
+
+    - name: Password strength policy (grep pam)
+      shell: grep -E "minlen|minclass" /etc/security/pwquality.conf || true
+      register: pw_strength
+
+    - name: Save password strength
+      lineinfile:
+        path: /tmp/security_report.txt
+        line: "Password policy: {{ pw_strength.stdout | default('Not set') }}"
+
+    - name: Password aging info
+      shell: chage -l root
+      register: pw_age
+
+    - name: Save password aging info
+      lineinfile:
+        path: /tmp/security_report.txt
+        line: "Password age: {{ pw_age.stdout_lines | join(', ') }}"
+
+    - name: Check root ssh login disabled
+      shell: grep "^PermitRootLogin" /etc/ssh/sshd_config || echo "Not set"
+      register: root_ssh
+
+    - name: Save root ssh login setting
+      lineinfile:
+        path: /tmp/security_report.txt
+        line: "PermitRootLogin: {{ root_ssh.stdout }}"
+
+    - name: Verify SSH port
+      shell: grep "^Port" /etc/ssh/sshd_config || echo "22 (default)"
+      register: ssh_port
+
+    - name: Save SSH port
+      lineinfile:
+        path: /tmp/security_report.txt
+        line: "SSH Port: {{ ssh_port.stdout }}"
+
+    # ✅ Only check required services
+    - name: Check specific services (vsftpd, httpd, mysql/mysqld, smbd, crond)
+      shell: |
+        for svc in vsftpd httpd mysqld mysql smbd crond; do
+          if systemctl is-active --quiet $svc; then
+            echo "$svc: running"
+          else
+            echo "$svc: not running"
+          fi
+        done
+      register: service_status
+
+    - name: Save required services status
+      blockinfile:
+        path: /tmp/security_report.txt
+        block: |
+          Monitored services:
+          {{ service_status.stdout }}
+
+    - name: Check secure login logs
+      shell: grep "Failed password" /var/log/secure | tail -n 5 || true
+      register: secure_logs
+
+    - name: Save secure login logs
+      blockinfile:
+        path: /tmp/security_report.txt
+        block: |
+          Failed login attempts (last 5):
+          {{ secure_logs.stdout }}
+
+    - name: Check if ethtool is installed
+      command: which ethtool
+      register: ethtool_check
+      ignore_errors: yes
+
+    - name: Get ethernet speed via ethtool
+      shell: ethtool $(ip route | grep '^default' | awk '{print $5}') | grep Speed
+      register: eth_speed
+      when: ethtool_check.rc == 0
+      ignore_errors: yes
+
+    - name: Fallback to ip link if ethtool not available
+      shell: ip -s link
+      register: eth_fallback
+      when: eth_speed is failed or eth_speed.stdout == ""
+      ignore_errors: yes
+
+    - name: Save ethernet speed
+      lineinfile:
+        path: /tmp/security_report.txt
+        line: "Ethernet Speed: {{ eth_speed.stdout | default(eth_fallback.stdout) | default('Unknown') }}"
