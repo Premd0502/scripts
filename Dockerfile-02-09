@@ -1,0 +1,11 @@
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y \
+    poppler-utils \
+    pdftk-java \
+    ghostscript \
+    && rm -rf /var/lib/apt/lists/*
+COPY process.sh /usr/local/bin/process.sh
+RUN chmod +x /usr/local/bin/process.sh && gs --version
+
+# set entrypoint if needed
+CMD ["/usr/local/bin/process.sh"]

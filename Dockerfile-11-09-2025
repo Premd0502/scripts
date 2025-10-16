@@ -1,0 +1,29 @@
+# Use Ubuntu 24.04 as base
+FROM ubuntu:24.04
+
+# Avoid interactive prompts during apt operations
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CATALINA_HOME=/opt/tomcat9
+ENV PATH=$CATALINA_HOME/bin:$PATH
+
+# Update, upgrade and install required packages
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y openjdk-17-jdk curl vim && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy your host's Tomcat folder into the container
+COPY tomcat9 /opt/tomcat9
+
+# Change Tomcat default port from 8080 → 8081
+RUN sed -i 's/8080/8081/g' $CATALINA_HOME/conf/server.xml
+
+# Make scripts executable
+RUN chmod -R +x $CATALINA_HOME/bin
+
+# Expose Tomcat port
+EXPOSE 8081
+
+# Start Tomcat
+CMD ["catalina.sh", "run"]
+

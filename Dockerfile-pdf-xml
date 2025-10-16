@@ -1,0 +1,18 @@
+FROM ubuntu:24.04
+
+RUN apt update && apt install -y \
+    poppler-utils \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Optional: install pdf2xml from source if needed
+# RUN wget http://example.com/pdf2xml.zip && unzip pdf2xml.zip && ...
+
+WORKDIR /app
+RUN mkdir -p /app/input /app/output
+COPY convert.sh /app/convert.sh
+RUN chmod +x /app/convert.sh
+
+ENTRYPOINT ["/app/convert.sh"]
+

@@ -1,0 +1,22 @@
+# Use a lightweight base image
+FROM ubuntu:24.04
+
+# Update packages and install necessary tools
+RUN apt-get update && apt-get install -y \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory
+WORKDIR /app
+
+# Create the directories for input and output
+RUN mkdir -p /app/input /app/output
+
+# Copy the conversion script into the container
+COPY process.sh /app/process.sh
+
+# Make the script executable
+RUN chmod +x /app/process.sh
+
+# Set the entrypoint to the conversion script
+ENTRYPOINT ["/app/process.sh"]

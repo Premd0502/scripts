@@ -1,0 +1,24 @@
+# Start with the official Ubuntu base image
+FROM ubuntu:22.04
+
+# Update the package list and install necessary tools
+RUN apt-get update && apt-get install -y \
+    poppler-utils \
+    pdftk-java \
+    ghostscript \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Create the input and output directories
+RUN mkdir -p /app/input /app/output
+
+# Copy your script into the container
+COPY process.sh /app/process.sh
+
+# Make the script executable and check ghostscript version
+RUN chmod +x /app/process.sh && gs --version
+
+# Specify the command to run when the container starts
+CMD ["/app/process.sh"]
